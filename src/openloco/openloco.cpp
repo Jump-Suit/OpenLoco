@@ -13,6 +13,9 @@
 #endif
 #include <objbase.h>
 #include <windows.h>
+
+// `small` is used as a type in `windows.h`
+#undef small
 #endif
 
 #include "audio/audio.h"
@@ -20,32 +23,37 @@
 #include "config.h"
 #include "date.h"
 #include "environment.h"
+#include "graphics/colours.h"
 #include "graphics/gfx.h"
+#include "gui.h"
 #include "industrymgr.h"
 #include "input.h"
 #include "interop/interop.hpp"
 #include "intro.h"
+#include "localisation/languagefiles.h"
+#include "localisation/languages.h"
 #include "localisation/string_ids.h"
+#include "multiplayer.h"
 #include "objects/objectmgr.h"
 #include "openloco.h"
 #include "platform/platform.h"
 #include "progressbar.h"
+#include "s5/s5.h"
 #include "scenariomgr.h"
 #include "stationmgr.h"
 #include "things/thingmgr.h"
 #include "townmgr.h"
 #include "tutorial.h"
 #include "ui.h"
+#include "ui/WindowManager.h"
 #include "utility/numeric.hpp"
-#include "windowmgr.h"
+#include "viewportmgr.h"
 
 #pragma warning(disable : 4611) // interaction between '_setjmp' and C++ object destruction is non - portable
 
 using namespace openloco::interop;
-namespace windowmgr = openloco::ui::windowmgr;
-using input_flags = openloco::input::input_flags;
-using input_state = openloco::input::input_state;
-using window_type = openloco::ui::window_type;
+using namespace openloco::ui;
+using namespace openloco::input;
 
 namespace openloco
 {
@@ -65,9 +73,17 @@ namespace openloco
     loco_global<uint8_t, 0x00508F14> _screen_flags;
     loco_global<uint8_t, 0x00508F17> paused_state;
     loco_global<uint8_t, 0x00508F1A> game_speed;
-    loco_global<uint8_t, 0x0050AF26> byte_50AF26;
+    static loco_global<string_id, 0x0050A018> _mapTooltipFormatArguments;
+    static loco_global<company_id_t, 0x0050A040> _mapTooltipOwner;
+    static loco_global<int32_t, 0x0052339C> _52339C;
+    static loco_global<int8_t, 0x0052336E> _52336E; // bool
     loco_global<utility::prng, 0x00525E18> _prng;
+    static loco_global<company_id_t[2], 0x00525E3C> _player_company;
     loco_global<uint32_t, 0x00525F5E> _scenario_ticks;
+    static loco_global<int16_t, 0x00525F62> _525F62;
+    static loco_global<company_id_t, 0x009C68EB> _updating_company_id;
+    static loco_global<char[256], 0x011367A0> _11367A0;
+    static loco_global<char[256], 0x011368A0> _11368A0;
 
     static void tick_logic(int32_t count);
     static void tick_logic();
@@ -99,6 +115,11 @@ namespace openloco
     }
 #endif
 
+    uint8_t get_screen_flags()
+    {
+        return _screen_flags;
+    }
+
     bool is_editor_mode()
     {
         return (_screen_flags & screen_flags::editor) != 0;
@@ -109,12 +130,22 @@ namespace openloco
         return (_screen_flags & screen_flags::title) != 0;
     }
 
+    bool isNetworked()
+    {
+        return (_screen_flags & screen_flags::networked) != 0;
+    }
+
     bool is_unknown_4_mode()
     {
         return (_screen_flags & screen_flags::unknown_4) != 0;
     }
 
     bool is_paused()
+    {
+        return paused_state;
+    }
+
+    uint8_t get_pause_flags()
     {
         return paused_state;
     }
@@ -193,14 +224,6 @@ namespace openloco
         return result != 0;
     }
 
-    static void sub_431A8A(uint16_t bx, uint16_t dx)
-    {
-        registers regs;
-        regs.bx = bx;
-        regs.dx = dx;
-        call(0x00431A8A, regs);
-    }
-
     // 0x00407FFD
     static bool is_already_running(const char* mutexName)
     {
@@ -232,17 +255,39 @@ namespace openloco
     }
 
     // 0x004C57C0
-    static void initialise_viewports()
+    void initialise_viewports()
     {
-        call(0x004C57C0);
+        _mapTooltipFormatArguments = string_ids::null;
+        _mapTooltipOwner = company_id::null;
+
+        colour::init_colour_map();
+        ui::WindowManager::init();
+        ui::viewportmgr::init();
+
+        input::init();
+        input::init_mouse();
+
+        // rain-related
+        _52339C = -1;
+
+        // tooltip-related
+        _52336E = 0;
+
+        ui::textinput::cancel();
+
+        stringmgr::format_string(_11367A0, string_ids::label_button_ok);
+        stringmgr::format_string(_11368A0, string_ids::label_button_cancel);
     }
 
     static void initialise()
     {
+        std::srand(std::time(0));
         addr<0x0050C18C, int32_t>() = addr<0x00525348, int32_t>();
         call(0x004078BE);
         call(0x004BF476);
         environment::resolve_paths();
+        localisation::enumerateLanguages();
+        localisation::loadLanguageFile();
         progressbar::begin(string_ids::loading, 0);
         progressbar::set_progress(30);
         startup_checks();
@@ -262,26 +307,127 @@ namespace openloco
         ui::initialise_cursors();
         progressbar::end();
         ui::initialise();
-        audio::initialise();
         initialise_viewports();
         call(0x004284C8);
         call(0x004969DA);
         call(0x0043C88C);
-        addr<0x00508F14, int16_t>() |= 0x20;
+        _screen_flags = _screen_flags | screen_flags::unknown_5;
 #ifdef _SHOW_INTRO_
         intro::state(intro::intro_state::begin);
 #else
         intro::state(intro::intro_state::end);
 #endif
         call(0x0046AD7D);
-        call(0x00438A6C);
+        gui::init();
         gfx::clear(gfx::screen_dpi(), 0x0A0A0A0A);
     }
 
-    // 0x0048AC66
-    static void play_title_screen_music()
+    // 0x00428E47
+    static void sub_428E47()
     {
-        call(0x0048AC66);
+        call(0x00428E47);
+    }
+
+    // 0x0046E388
+    static void sub_46E388()
+    {
+        call(0x0046E388);
+    }
+
+    // 0x004317BD
+    static uint32_t sub_4317BD()
+    {
+        registers regs;
+        call(0x004317BD, regs);
+
+        return regs.eax;
+    }
+
+    // 0x0046E4E3
+    static void sub_46E4E3()
+    {
+        call(0x0046E4E3);
+    }
+
+    void sub_431695(uint16_t var_F253A0)
+    {
+        if (!isNetworked())
+        {
+            _updating_company_id = companymgr::get_controlling_id();
+            for (auto i = 0; i < var_F253A0; i++)
+            {
+                sub_428E47();
+                WindowManager::dispatchUpdateAll();
+            }
+
+            input::process_keyboard_input();
+            WindowManager::update();
+            ui::handleInput();
+            companymgr::updateOwnerStatus();
+            return;
+        }
+
+        // Only run every other tick?
+        if (_525F62 % 2 != 0)
+        {
+            return;
+        }
+
+        // Host/client?
+        if ((get_screen_flags() & screen_flags::unknown_3) != 0)
+        {
+            _updating_company_id = companymgr::get_controlling_id();
+
+            // run twice as often as var_F253A0
+            for (auto i = 0; i < var_F253A0 * 2; i++)
+            {
+                sub_428E47();
+                WindowManager::dispatchUpdateAll();
+            }
+
+            input::process_keyboard_input();
+            WindowManager::update();
+            WindowManager::update();
+            ui::handleInput();
+            companymgr::updateOwnerStatus();
+            sub_46E388();
+
+            _updating_company_id = _player_company[1];
+            sub_4317BD();
+        }
+        else
+        {
+            _updating_company_id = _player_company[1];
+            auto eax = sub_4317BD();
+
+            _updating_company_id = _player_company[0];
+            if (!is_title_mode())
+            {
+                auto edx = _prng->srand_0();
+                edx ^= companymgr::get(0)->var_08.var_00;
+                edx ^= companymgr::get(1)->var_08.var_00;
+                if (edx != eax)
+                {
+                    // disconnect?
+                    sub_46E4E3();
+                    return;
+                }
+            }
+
+            // run twice as often as var_F253A0
+            for (auto i = 0; i < var_F253A0 * 2; i++)
+            {
+                sub_428E47();
+                WindowManager::dispatchUpdateAll();
+            }
+
+            input::process_keyboard_input();
+            WindowManager::update();
+            WindowManager::update();
+            ui::handleInput();
+            companymgr::updateOwnerStatus();
+            sub_46E388();
+        }
     }
 
     // 0x0046A794
@@ -345,19 +491,19 @@ namespace openloco
         addr<0x005233B2, int32_t>() += addr<0x01140840, int32_t>();
         addr<0x0114084C, int32_t>() = 0;
         addr<0x01140840, int32_t>() = 0;
-        if (byte_50AF26 == 0)
+        if (config::get().var_72 == 0)
         {
-            byte_50AF26 = 16;
+            config::get().var_72 = 16;
             gfx::clear(gfx::screen_dpi(), 0);
             ui::get_cursor_pos(addr<0x00F2538C, int32_t>(), addr<0x00F25390, int32_t>());
             addr<0x00F2539C, int32_t>() = 0;
         }
         else
         {
-            if (byte_50AF26 >= 16)
+            if (config::get().var_72 >= 16)
             {
-                byte_50AF26++;
-                if (byte_50AF26 >= 48)
+                config::get().var_72++;
+                if (config::get().var_72 >= 48)
                 {
                     if (sub_4034FC(addr<0x00F25394, int32_t>(), addr<0x00F25398, int32_t>()))
                     {
@@ -372,15 +518,15 @@ namespace openloco
                 }
                 ui::set_cursor_pos(addr<0x00F2538C, int32_t>(), addr<0x00F25390, int32_t>());
                 gfx::invalidate_screen();
-                if (byte_50AF26 != 96)
+                if (config::get().var_72 != 96)
                 {
                     tick_wait();
                     return;
                 }
-                byte_50AF26 = 1;
+                config::get().var_72 = 1;
                 if (addr<0x00F2539C, int32_t>() != 0)
                 {
-                    byte_50AF26 = 2;
+                    config::get().var_72 = 2;
                 }
                 config::write();
             }
@@ -391,11 +537,11 @@ namespace openloco
             if (addr<0x00525340, int32_t>() == 1)
             {
                 addr<0x00525340, int32_t>() = 0;
-                addr<0x00508F10, uint16_t>() |= (1 << 1);
+                multiplayer::set_flag(multiplayer::flags::flag_1);
             }
 
             input::handle_keyboard();
-            sub_48A18C();
+            audio::update_sounds();
 
             addr<0x0050C1AE, int32_t>()++;
             if (intro::is_active())
@@ -405,11 +551,11 @@ namespace openloco
             else
             {
                 uint16_t numUpdates = std::clamp<uint16_t>(time_since_last_tick / (uint16_t)31, 1, 3);
-                if (windowmgr::find(window_type::multiplayer, 0) != nullptr)
+                if (WindowManager::find(ui::WindowType::multiplayer, 0) != nullptr)
                 {
                     numUpdates = 1;
                 }
-                if (_screen_flags & screen_flags::unknown_2)
+                if (isNetworked())
                 {
                     numUpdates = 1;
                 }
@@ -445,8 +591,8 @@ namespace openloco
                 {
                     numUpdates = 0;
                 }
-                addr<0x00F253A0, uint16_t>() = std::max<uint16_t>(1, numUpdates);
-                _screen_age = std::min(0xFFFF, (int32_t)_screen_age + addr<0x00F253A0, int16_t>());
+                uint16_t var_F253A0 = std::max<uint16_t>(1, numUpdates);
+                _screen_age = std::min(0xFFFF, (int32_t)_screen_age + var_F253A0);
                 if (game_speed != 0)
                 {
                     numUpdates *= 3;
@@ -459,10 +605,10 @@ namespace openloco
                 sub_46FFCA();
                 tick_logic(numUpdates);
 
-                addr<0x00525F62, int16_t>()++;
+                _525F62++;
                 call(0x0043D9D4);
-                call(0x0048A78D);
-                play_title_screen_music();
+                audio::play_background_music();
+                audio::play_title_screen_music();
                 if (tutorial::state() != tutorial::tutorial_state::none && addr<0x0052532C, int32_t>() == 0 && addr<0x0113E2E4, int32_t>() < 0x40)
                 {
                     tutorial::stop();
@@ -472,20 +618,20 @@ namespace openloco
                     return; // won't be reached
                 }
 
-                call(0x00431695);
+                sub_431695(var_F253A0);
                 call(0x00452B5F);
                 sub_46FFCA();
-                if (addr<0x0050AEC0, uint8_t>() != 0xFF)
+                if (config::get().countdown != 0xFF)
                 {
-                    addr<0x0050AEC0, uint8_t>()++;
-                    if (addr<0x0050AEC0, uint8_t>() != 0xFF)
+                    config::get().countdown++;
+                    if (config::get().countdown != 0xFF)
                     {
                         config::write();
                     }
                 }
             }
 
-            if (byte_50AF26 == 2)
+            if (config::get().var_72 == 2)
             {
                 addr<0x005252DC, int32_t>() = 1;
                 ui::get_cursor_pos(addr<0x00F2538C, int32_t>(), addr<0x00F25390, int32_t>());
@@ -525,6 +671,9 @@ namespace openloco
         addr<0x010E7D64, uint32_t>() = 0xD900BF;
     }
 
+    static loco_global<int8_t, 0x0050C197> _50C197;
+    static loco_global<string_id, 0x0050C198> _50C198;
+
     // 0x0046ABCB
     static void tick_logic()
     {
@@ -533,7 +682,7 @@ namespace openloco
         addr<0x00525FCC, uint32_t>() = _prng->srand_0();
         addr<0x00525FD0, uint32_t>() = _prng->srand_1();
         call(0x004613F0);
-        addr<0x00F25374, uint8_t>() = addr<0x009C871C, uint8_t>();
+        addr<0x00F25374, uint8_t>() = s5::getOptions().madeAnyChanges;
         date_tick();
         call(0x00463ABA);
         call(0x004C56F6);
@@ -546,22 +695,22 @@ namespace openloco
         sub_46FFCA();
         companymgr::update();
         invalidate_map_animations();
-        call(0x0048A73B);
-        call(0x0048ACFD);
+        audio::update_vehicle_noise();
+        audio::update_ambient_noise();
         call(0x00444387);
 
-        addr<0x009C871C, uint8_t>() = addr<0x00F25374, uint8_t>();
-        if (addr<0x0050C197, uint8_t>() != 0)
+        s5::getOptions().madeAnyChanges = addr<0x00F25374, uint8_t>();
+        if (_50C197 != 0)
         {
-            uint16_t bx = 0x043A;
-            uint16_t dx = addr<0x0050C198, uint16_t>();
-            if (addr<0x0050C197, uint8_t>() == 0xFE)
+            auto title = string_ids::error_unable_to_load_saved_game;
+            auto message = _50C198;
+            if (_50C197 == -2)
             {
-                bx = addr<0x0050C198, uint16_t>();
-                dx = 0xFFFF;
+                title = _50C198;
+                message = string_ids::null;
             }
-            addr<0x0050C197, uint8_t>() = 0;
-            sub_431A8A(bx, dx);
+            _50C197 = 0;
+            ui::windows::show_error(title, message);
         }
     }
 
@@ -660,11 +809,6 @@ namespace openloco
         }
     }
 
-    void sub_48A18C()
-    {
-        call(0x0048A18C);
-    }
-
     // 0x00406386
     static void run()
     {
@@ -686,6 +830,11 @@ namespace openloco
             RegCloseKey(key);
         }
 #endif
+
+        // Call tick before ui::process_messages to ensure initialise is called
+        // otherwise window events can end up using an uninitialised window manager.
+        // This can be removed when initialise is moved out of tick().
+        tick();
 
         while (ui::process_messages())
         {
@@ -711,10 +860,13 @@ namespace openloco
         std::cout << versionInfo << std::endl;
         try
         {
+            const auto& cfg = config::read_new_config();
+            environment::resolve_paths();
+
             register_hooks();
             if (sub_4054B9())
             {
-                ui::create_window();
+                ui::create_window(cfg.display);
                 call(0x004078FE);
                 call(0x00407B26);
                 ui::initialise_input();

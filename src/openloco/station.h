@@ -2,14 +2,13 @@
 
 #include "localisation/stringmgr.h"
 #include "town.h"
+#include "types.hpp"
 #include "utility/numeric.hpp"
 #include <cstdint>
 #include <limits>
 
 namespace openloco
 {
-    using station_id_t = uint16_t;
-
     namespace station_id
     {
         constexpr station_id_t null = std::numeric_limits<station_id_t>::max();
@@ -47,13 +46,32 @@ namespace openloco
 
     constexpr size_t max_cargo_stats = 32;
 
+    enum station_flags : uint16_t
+    {
+        transport_mode_rail = (1 << 0),
+        transport_mode_road = (1 << 1),
+        transport_mode_air = (1 << 2),
+        transport_mode_water = (1 << 3),
+        flag_4 = (1 << 4),
+        flag_5 = (1 << 5),
+        flag_6 = (1 << 6),
+        flag_7 = (1 << 7),
+        flag_8 = (1 << 8),
+    };
+
+    constexpr uint16_t station_mask_all_modes = station_flags::transport_mode_rail | station_flags::transport_mode_road | station_flags::transport_mode_air | station_flags::transport_mode_water;
+
     struct station
     {
         string_id name; // 0x00
-        uint8_t pad_02[0x28 - 0x02];
+        uint8_t pad_02[0x08 - 0x02];
+        uint16_t label_left[4];
+        uint16_t label_right[4];
+        uint16_t label_top[4];
+        uint16_t label_bottom[4];
         company_id_t owner; // 0x28
         uint8_t var_29;
-        uint16_t var_2A;
+        uint16_t flags;
         town_id_t town;                                   // 0x2C
         station_cargo_stats cargo_stats[max_cargo_stats]; // 0x2E
         uint16_t var_1CE;
@@ -67,6 +85,7 @@ namespace openloco
         void update();
         uint32_t calc_accepted_cargo(uint16_t ax = 0xFFFF);
         void sub_48F7D1();
+        void getStatusString(const char* buffer);
         bool update_cargo();
         int32_t calculate_cargo_rating(const station_cargo_stats& cargo) const;
         void invalidate();

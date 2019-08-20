@@ -1,20 +1,88 @@
 #pragma once
 
+#include "../audio/audio.h"
+#include "../company.h"
 #include "../objects/vehicle_object.h"
+#include "../ui/WindowType.h"
+#include "../window.h"
 #include "thing.h"
 
 namespace openloco
 {
+    struct vehicle_bogie;
+    struct vehicle_body;
+    struct vehicle_26;
+
     namespace flags_5f
     {
         constexpr uint8_t breakdown_pending = 1 << 1;
         constexpr uint8_t broken_down = 1 << 2;
     }
 
-#pragma pack(push, 1)
-    struct vehicle : thing_base
+    enum class vehicle_thing_type : uint8_t
     {
-        uint8_t pad_20[0x28 - 0x20];
+        vehicle_0 = 0,
+        vehicle_1,
+        vehicle_2,
+        vehicle_bogie,
+        vehicle_body_end,
+        vehicle_body_cont,
+        vehicle_6,
+    };
+
+#pragma pack(push, 1)
+    struct vehicle_base : thing_base
+    {
+        vehicle_thing_type type;
+        uint8_t pad_02;
+        uint8_t pad_03;
+        thing_id_t next_thing_id; // 0x04
+        uint8_t pad_06[0x09 - 0x06];
+        uint8_t var_09;
+        thing_id_t id; // 0x0A
+        uint16_t var_0C;
+        int16_t x; // 0x0E
+        int16_t y; // 0x10
+        int16_t z; // 0x12
+        uint8_t var_14;
+        uint8_t var_15;
+        int16_t sprite_left;   // 0x16
+        int16_t sprite_top;    // 0x18
+        int16_t sprite_right;  // 0x1A
+        int16_t sprite_bottom; // 0x1C
+        uint8_t sprite_yaw;    // 0x1E
+        uint8_t sprite_pitch;  // 0x1F
+
+    private:
+        template<typename TType, vehicle_thing_type TClass>
+        TType* as() const
+        {
+            return type == TClass ? (TType*)this : nullptr;
+        }
+
+    public:
+        vehicle_bogie* as_vehicle_bogie() const { return as<vehicle_bogie, vehicle_thing_type::vehicle_bogie>(); }
+        vehicle_body* as_vehicle_body() const
+        {
+            auto vehicle = as<vehicle_body, vehicle_thing_type::vehicle_body_end>();
+            if (vehicle != nullptr)
+                return vehicle;
+            return as<vehicle_body, vehicle_thing_type::vehicle_body_cont>();
+        }
+        vehicle_26* as_vehicle_2or6() const
+        {
+            auto vehicle = as<vehicle_26, vehicle_thing_type::vehicle_2>();
+            if (vehicle != nullptr)
+                return vehicle;
+            return as<vehicle_26, vehicle_thing_type::vehicle_6>();
+        }
+    };
+
+    struct vehicle : vehicle_base
+    {
+        uint8_t pad_20;
+        company_id_t owner; // 0x21
+        uint8_t pad_22[0x28 - 0x22];
         uint16_t var_28;
         uint8_t pad_2A[0x2C - 0x2A];
         uint16_t var_2C;
@@ -28,11 +96,12 @@ namespace openloco
         thing_id_t next_car_id;     // 0x3A
         uint8_t pad_3C[0x40 - 0x3C];
         uint16_t object_id; // 0x40
-        uint8_t var_42;
+        TransportMode mode;
         uint8_t pad_43;
         int16_t var_44;
         uint8_t var_46;
-        uint8_t pad_47[0x4C - 0x47];
+        uint8_t pad_47[0x4A - 0x47];
+        uint16_t var_4A;
         uint8_t cargo_type; // 0x4C
         uint8_t pad_4D;
         uint16_t cargo_origin; // 0x4E
@@ -81,6 +150,16 @@ namespace openloco
         void electric_spark1_animation_update(uint8_t num, int8_t var_05);
         void electric_spark2_animation_update(uint8_t num, int8_t var_05);
         void ship_wake_animation_update(uint8_t num, int8_t var_05);
+    };
+
+    struct vehicle_26 : vehicle_base
+    {
+        uint8_t pad_20[0x44 - 0x20];
+        uint8_t sound_id; // 0x44
+        uint8_t pad_45[0x4A - 0x45];
+        uint16_t var_4A;                       // sound-related flag(s)
+        ui::window_number sound_window_number; // 0x4C
+        ui::WindowType sound_window_type;      // 0x4E
     };
 #pragma pack(pop)
 }

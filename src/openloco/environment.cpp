@@ -69,7 +69,7 @@ namespace openloco::environment
 
     static fs::path resolve_loco_install_path()
     {
-        auto& cfg = config::read_new_config();
+        auto& cfg = config::get_new();
         auto path = fs::path(cfg.loco_install_path);
         if (!path.empty())
         {
@@ -78,7 +78,7 @@ namespace openloco::environment
                 config::write_new_config();
                 return path;
             }
-            std::cerr << "Configured install path for Locomotion is missing data/g1.dat." << std::endl;
+            std::cerr << "Configured install path for Locomotion is missing Data/g1.DAT." << std::endl;
         }
 
         path = auto_detect_loco_install_path();
@@ -110,7 +110,7 @@ namespace openloco::environment
             }
 
             std::cerr << "Path is missing g1.dat." << std::endl;
-            ui::show_message_box("OpenLoco", "Path is missing data/g1.dat.");
+            ui::show_message_box("OpenLoco", "Path is missing Data/g1.DAT.");
             std::exit(-1);
         }
     }
@@ -158,13 +158,18 @@ namespace openloco::environment
         if (!fs::exists(result))
         {
 #ifndef _WIN32
-            if (auto similarResult = find_similar_file(result); similarResult.empty())
+            auto similarResult = find_similar_file(result);
+            if (similarResult.empty())
             {
-#endif
                 std::cerr << "File not found: " << result << std::endl;
-#ifndef _WIN32
+            }
+            else
+            {
                 result = similarResult;
             }
+#else
+
+            std::cerr << "File not found: " << result << std::endl;
 #endif
         }
         return result;
@@ -200,8 +205,14 @@ namespace openloco::environment
             case path_id::plugin2:
             case path_id::gamecfg:
             case path_id::scores:
-            case path_id::openloco_cfg:
+            case path_id::openloco_yml:
                 return platform::get_user_directory();
+            case path_id::language_files:
+#if defined(__APPLE__) && defined(__MACH__)
+                return platform::GetBundlePath();
+#else
+                return platform::GetCurrentExecutablePath().parent_path() / "data";
+#endif
             default:
                 return get_loco_install_path();
         }
@@ -258,7 +269,8 @@ namespace openloco::environment
             "Data/TUT800_1.DAT",
             "Data/TUT800_2.DAT",
             "Data/TUT800_3.DAT",
-            "openloco.cfg"
+            "openloco.yml",
+            "language",
         };
 
         size_t index = (size_t)id;

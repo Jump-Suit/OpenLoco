@@ -1,25 +1,23 @@
 #include "gui.h"
 #include "graphics/colours.h"
 #include "interop/interop.hpp"
+#include "map/tile.h"
 #include "objects/interface_skin_object.h"
 #include "objects/objectmgr.h"
 #include "openloco.h"
 #include "tutorial.h"
 #include "ui.h"
+#include "ui/WindowManager.h"
 #include "viewportmgr.h"
 #include "window.h"
-#include "windowmgr.h"
 
-namespace ui = openloco::ui;
-
-namespace windowmgr = openloco::ui::windowmgr;
-using window_type = openloco::ui::window_type;
 using namespace openloco::interop;
+using namespace openloco::ui;
 
 namespace openloco::gui
 {
 
-    loco_global<openloco::ui::widget[64], 0x00509c20> _mainWindowWidgets;
+    loco_global<openloco::ui::widget_t[64], 0x00509c20> _mainWindowWidgets;
 
     // 0x00438A6C
     void init()
@@ -29,162 +27,75 @@ namespace openloco::gui
 
         _mainWindowWidgets[0].bottom = uiHeight;
         _mainWindowWidgets[0].right = uiWidth;
-        auto window = openloco::ui::windowmgr::create_window(
-            window_type::main,
-            0,
-            0,
-            uiWidth,
-            uiHeight,
-            ui::window_flags::flag_0,
-            (void*)0x004FA1F4);
+        auto window = WindowManager::createWindow(
+            WindowType::main,
+            { 0, 0 },
+            gfx::ui_size_t(uiWidth, uiHeight),
+            ui::window_flags::stick_to_back,
+            (ui::window_event_list*)0x004FA1F4);
         window->widgets = _mainWindowWidgets;
         addr<0x00e3f0b8, int32_t>() = 0; // gCurrentRotation?
-        openloco::ui::viewportmgr::create(window, window->x, window->y, window->width, window->height, false, 0, 6143, 6143, 480);
+        openloco::ui::viewportmgr::create(
+            window,
+            0,
+            { window->x, window->y },
+            { window->width, window->height },
+            viewportmgr::ZoomLevel::full,
+            { (map::map_rows * map::tile_size) / 2 - 1, (map::map_rows * map::tile_size) / 2 - 1, 480 });
 
         addr<0x00F2533F, int8_t>() = 0; // grid lines
         addr<0x0112C2e1, int8_t>() = 0;
-        addr<0x009c86f8, int32_t>() = 0;
-        addr<0x009c870C, int8_t>() = 0; // Something to do with tutorial
-        addr<0x009c870D, int8_t>() = 0;
         addr<0x009c870E, int8_t>() = 1;
         addr<0x009c870F, int8_t>() = 2;
         addr<0x009c8710, int8_t>() = 1;
 
         if (openloco::is_title_mode())
         {
-            window = openloco::ui::windowmgr::create_window(
-                window_type::title_menu,
-                (uiWidth - 296) / 2,
-                uiHeight - 117,
-                296,
-                92,
-                ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5 | ui::window_flags::flag_6,
-                (void*)0x004f9ec8);
-            window->widgets = (ui::widget*)0x00509df4;
-            window->enabled_widgets = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5);
-
-            windowmgr::init_scroll_widgets(window);
-
-            window->colours[0] = colour::translucent(colour::saturated_green);
-            window->colours[1] = colour::translucent(colour::saturated_green);
-            window->var_846 = 0;
-
-            window = openloco::ui::windowmgr::create_window(
-                window_type::title_exit,
-                uiWidth - 40,
-                uiHeight - 28,
-                40,
-                28,
-                ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5 | ui::window_flags::flag_6,
-                (void*)0x004f9f3c);
-            window->widgets = (ui::widget*)0x00509e58;
-            window->enabled_widgets = (1 << 0);
-
-            windowmgr::init_scroll_widgets(window);
-
-            window->colours[0] = colour::translucent(colour::saturated_green);
-            window->colours[1] = colour::translucent(colour::saturated_green);
-
-            window = openloco::ui::windowmgr::create_window(
-                window_type::title_logo,
-                0,
-                0,
-                298,
-                170,
-                ui::window_flags::flag_1,
-                (void*)0x004f9fb0);
-            window->widgets = (ui::widget*)0x00509e6c;
-            window->enabled_widgets = (1 << 0);
-
-            windowmgr::init_scroll_widgets(window);
-
-            window->flags |= ui::window_flags::flag_4;
-            window->colours[0] = colour::translucent(colour::grey);
-            window->colours[1] = colour::translucent(colour::grey);
-
+            ui::windows::open_title_menu();
+            ui::windows::open_title_exit();
+            ui::windows::open_title_logo();
             ui::windows::open_title_version();
+            ui::title_options::open();
         }
         else
         {
+            windows::toolbar_top::open();
 
-            window = openloco::ui::windowmgr::create_window(
-                window_type::toolbar_top,
-                0,
-                0,
-                uiWidth,
-                28,
-                ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5,
-                (void*)0x4fa180);
-            window->widgets = (ui::widget*)0x509c34;
-            window->enabled_widgets = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (1 << 12);
-            windowmgr::init_scroll_widgets(window);
+            window = WindowManager::createWindow(
+                WindowType::playerInfoToolbar,
+                gfx::point_t(0, uiHeight - 27),
+                gfx::ui_size_t(140, 27),
+                ui::window_flags::stick_to_front | ui::window_flags::transparent | ui::window_flags::no_background,
+                (ui::window_event_list*)0x4fa024);
+            window->widgets = (ui::widget_t*)0x509d08;
+            window->enabled_widgets = (1 << 2) | (1 << 3) | (1 << 4);
+            window->var_854 = 0;
+            window->init_scroll_widgets();
 
             auto skin = openloco::objectmgr::get<interface_skin_object>();
             if (skin != nullptr)
             {
-                window->colours[0] = skin->colours_12[0];
-                window->colours[1] = skin->colours_12[1];
-                window->colours[2] = skin->colours_12[2];
-                window->colours[3] = skin->colours_12[3];
+                window->colours[0] = colour::translucent(skin->colour_16);
+                window->colours[1] = colour::translucent(skin->colour_16);
             }
-
-            window = openloco::ui::windowmgr::create_window(
-                window_type::toolbar_player_info,
-                0,
-                uiHeight - 27,
-                140,
-                27,
-                ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5,
-                (void*)0x4fa024);
-            window->widgets = (ui::widget*)0x509d08;
-            window->enabled_widgets = (1 << 2) | (1 << 3) | (1 << 4);
-            window->var_854 = 0;
-            windowmgr::init_scroll_widgets(window);
-
-            if (skin != nullptr)
-            {
-                window->colours[0] = colour::translucent(skin->colours_12[4]);
-                window->colours[1] = colour::translucent(skin->colours_12[4]);
-            }
-
-            window = openloco::ui::windowmgr::create_window(
-                window_type::toolbar_time,
-                uiWidth - 140,
-                uiHeight - 27,
-                140,
-                27,
-                ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5,
-                (void*)0x4fa098);
-            window->widgets = (ui::widget*)0x509d5c;
-            window->enabled_widgets = (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7);
-            window->var_854 = 0;
-            window->var_856 = 0;
-            windowmgr::init_scroll_widgets(window);
-
-            if (skin != nullptr)
-            {
-                window->colours[0] = colour::translucent(skin->colours_12[5]);
-                window->colours[1] = colour::translucent(skin->colours_12[5]);
-            }
+            TimePanel::open();
 
             if (openloco::tutorial::state() != tutorial::tutorial_state::none)
             {
 
-                window = openloco::ui::windowmgr::create_window(
-                    window_type::tutorial,
-                    140,
-                    uiHeight - 27,
-                    uiWidth - 280,
-                    27,
-                    ui::window_flags::flag_1 | ui::window_flags::flag_4 | ui::window_flags::flag_5,
-                    (void*)0x4fa10c);
-                window->widgets = (ui::widget*)0x509de0;
-                windowmgr::init_scroll_widgets(window);
+                window = WindowManager::createWindow(
+                    WindowType::tutorial,
+                    gfx::point_t(140, uiHeight - 27),
+                    gfx::ui_size_t(uiWidth - 280, 27),
+                    ui::window_flags::stick_to_front | ui::window_flags::transparent | ui::window_flags::no_background,
+                    (ui::window_event_list*)0x4fa10c);
+                window->widgets = (ui::widget_t*)0x509de0;
+                window->init_scroll_widgets();
 
                 if (skin != nullptr)
                 {
-                    window->colours[0] = colour::translucent(skin->colours_06[0]);
-                    window->colours[1] = colour::translucent(skin->colours_06[1]);
+                    window->colours[0] = colour::translucent(skin->colour_06);
+                    window->colours[1] = colour::translucent(skin->colour_07);
                 }
             }
         }
@@ -204,66 +115,76 @@ namespace openloco::gui
             return;
         }
 
-        auto window = windowmgr::get_main();
+        auto window = WindowManager::getMainWindow();
         if (window)
         {
             window->width = uiWidth;
             window->height = uiHeight;
-            window->widgets[0].right = uiWidth;
-            window->widgets[0].bottom = uiHeight;
-            window->viewport->width = uiWidth;
-            window->viewport->height = uiHeight;
-            window->viewport->view_width = uiWidth << window->viewport->zoom;
-            window->viewport->view_height = uiHeight << window->viewport->zoom;
+            if (window->widgets)
+            {
+                window->widgets[0].right = uiWidth;
+                window->widgets[0].bottom = uiHeight;
+            }
+            if (window->viewports[0])
+            {
+                window->viewports[0]->width = uiWidth;
+                window->viewports[0]->height = uiHeight;
+                window->viewports[0]->view_width = uiWidth << window->viewports[0]->zoom;
+                window->viewports[0]->view_height = uiHeight << window->viewports[0]->zoom;
+            }
         }
 
-        window = windowmgr::find(window_type::toolbar_top);
+        window = WindowManager::find(WindowType::topToolbar);
         if (window)
         {
             window->width = std::max(uiWidth, 640);
         }
 
-        window = windowmgr::find(window_type::toolbar_player_info);
+        window = WindowManager::find(WindowType::playerInfoToolbar);
         if (window)
         {
             window->y = uiHeight - 27;
         }
 
-        window = windowmgr::find(window_type::toolbar_time);
+        window = WindowManager::find(WindowType::timeToolbar);
         if (window)
         {
-            window->y = uiHeight - 27;
-            window->x = std::max(uiWidth, 640) - 140;
+            window->y = uiHeight - window->height;
+            window->x = std::max(uiWidth, 640) - window->width;
         }
 
-        window = windowmgr::find(window_type::title_menu);
+        window = WindowManager::find(WindowType::titleMenu);
         if (window)
         {
             window->x = uiWidth / 2 - 148;
             window->y = uiHeight - 117;
         }
 
-        window = windowmgr::find(window_type::title_exit);
+        window = WindowManager::find(WindowType::titleExit);
         if (window)
         {
             window->x = uiWidth - 40;
             window->y = uiHeight - 28;
         }
 
-        window = windowmgr::find(window_type::openloco_version);
+        window = WindowManager::find(WindowType::openLocoVersion);
         if (window)
         {
             window->y = uiHeight - window->height;
         }
 
-        window = windowmgr::find(window_type::tutorial);
+        window = WindowManager::find(WindowType::titleOptions);
+        if (window)
+        {
+            window->x = uiWidth - window->width;
+        }
+
+        window = WindowManager::find(WindowType::tutorial);
         if (window)
         {
             if (tutorial::state() == tutorial::tutorial_state::none)
             {
-                registers regs;
-                regs.esi = (uint32_t)window;
-                call(0x004CC6EA, regs);
+                WindowManager::close(window);
             }
         }
     }

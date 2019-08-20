@@ -2,19 +2,18 @@
 #include "../interop/interop.hpp"
 #include "../openloco.h"
 #include "../ui.h"
+#include "../ui/WindowManager.h"
 #include "../window.h"
-#include "../windowmgr.h"
 
 using namespace openloco::interop;
 
 namespace openloco::ui::windows
 {
-    static widget widgets[] = {
-        { 0x1E, 0, 0, 0, 0, 0, { 0 }, 0 }
+    static widget_t widgets[] = {
+        { widget_type::end, 0, 0, 0, 0, 0, { 0 }, 0 }
     };
 
     static ui::window_event_list _events;
-    static bool _initialisedDrawHook;
 
     static void draw(ui::window* window, gfx::drawpixelinfo_t* dpi);
 
@@ -22,30 +21,16 @@ namespace openloco::ui::windows
     {
         auto width = 512;
         auto height = 16;
-        auto window = openloco::ui::windowmgr::create_window(
-            window_type::openloco_version,
-            8,
-            ui::height() - height,
-            width,
-            height,
-            (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6),
-            (void*)&_events);
+        auto window = openloco::ui::WindowManager::createWindow(
+            WindowType::openLocoVersion,
+            gfx::point_t(8, ui::height() - height),
+            gfx::ui_size_t(width, height),
+            window_flags::stick_to_front | window_flags::transparent | window_flags::no_background | window_flags::flag_6,
+            &_events);
         window->widgets = widgets;
 
         _events.prepare_draw = (void (*)(ui::window*))0x0042A035;
-        _events.draw = (void (*)(ui::window*, gfx::drawpixelinfo_t*))0x00401B34;
-        _events.event_28 = 0x0042A035;
-
-        if (!_initialisedDrawHook)
-        {
-            _initialisedDrawHook = true;
-            interop::register_hook(
-                (uintptr_t)_events.draw,
-                [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-                    draw((ui::window*)regs.esi, (gfx::drawpixelinfo_t*)regs.edi);
-                    return 0;
-                });
-        }
+        _events.draw = draw;
 
         return window;
     }
@@ -54,15 +39,6 @@ namespace openloco::ui::windows
     static void draw(ui::window* window, gfx::drawpixelinfo_t* dpi)
     {
         auto versionInfo = get_version_info();
-        {
-            registers regs;
-            regs.cx = window->x;
-            regs.dx = window->y;
-            regs.bx = 160;
-            regs.al = colour::white | 0x20;
-            regs.edi = (int32_t)dpi;
-            regs.esi = (int32_t)versionInfo.c_str();
-            call(0x00451025, regs);
-        }
+        gfx::draw_string(dpi, window->x, window->y, colour::white | format_flags::textflag_5, (void*)versionInfo.c_str());
     }
 }

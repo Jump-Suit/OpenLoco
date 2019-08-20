@@ -5,6 +5,7 @@
 namespace openloco
 {
     using colour_t = uint8_t;
+    using palette_index_t = uint8_t;
 
     namespace colour
     {
@@ -52,5 +53,14 @@ namespace openloco
         {
             return c & ~translucent_flag;
         }
+
+        void init_colour_map();
+        palette_index_t get_shade(colour_t colour, uint8_t shade);
+    }
+
+    namespace palette_index
+    {
+        constexpr palette_index_t transparent = 0;
+        constexpr palette_index_t index_0A = 0x0A;
     }
 }

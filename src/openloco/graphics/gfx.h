@@ -64,18 +64,101 @@ namespace openloco::gfx
 
 #pragma pack(pop)
 
+    struct point_t
+    {
+        int16_t x = 0;
+        int16_t y = 0;
+
+        constexpr point_t(){};
+
+        constexpr point_t(int16_t x, int16_t y)
+            : x(x)
+            , y(y)
+        {
+        }
+
+        bool operator==(const point_t& rhs)
+        {
+            return x == rhs.x && y == rhs.y;
+        }
+
+        bool operator==(const int16_t rhs)
+        {
+            return x == rhs && y == rhs;
+        }
+
+        point_t& operator+=(const point_t& rhs)
+        {
+            x += rhs.x;
+            y += rhs.y;
+            return *this;
+        }
+
+        point_t& operator-=(const point_t& rhs)
+        {
+            x -= rhs.x;
+            y -= rhs.y;
+            return *this;
+        }
+
+        friend point_t operator+(point_t lhs, const point_t& rhs)
+        {
+            lhs += rhs;
+            return lhs;
+        }
+
+        friend point_t operator-(point_t lhs, const point_t& rhs)
+        {
+            lhs -= rhs;
+            return lhs;
+        }
+    };
+
+    struct ui_size_t
+    {
+        uint16_t width;
+        uint16_t height;
+
+        constexpr ui_size_t(uint16_t width, uint16_t height)
+            : width(width)
+            , height(height)
+        {
+        }
+    };
+
     drawpixelinfo_t& screen_dpi();
 
     void load_g1();
+    g1_element* get_g1_element(uint32_t image);
     void clear(drawpixelinfo_t& dpi, uint32_t fill);
     void clear_single(drawpixelinfo_t& dpi, uint8_t paletteId);
+
+    int16_t clip_string(int16_t width, char* string);
+    uint16_t get_string_width(const char* buffer);
+
+    gfx::point_t draw_string(drawpixelinfo_t* context, int16_t x, int16_t y, uint8_t colour, void* str);
+
+    int16_t draw_string_495224(
+        drawpixelinfo_t& dpi,
+        int16_t x,
+        int16_t y,
+        int16_t width,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
     void draw_string_494B3F(
         drawpixelinfo_t& dpi,
         int16_t x,
         int16_t y,
         uint8_t colour,
         string_id stringId,
-        const void* args);
+        const void* args = nullptr);
+    void draw_string_494B3F(
+        drawpixelinfo_t& dpi,
+        point_t* origin,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
     void draw_string_494BBF(
         drawpixelinfo_t& dpi,
         int16_t x,
@@ -83,8 +166,52 @@ namespace openloco::gfx
         int16_t width,
         uint8_t colour,
         string_id stringId,
-        const void* args);
-    void draw_rect(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint16_t dx, uint16_t dy, uint32_t color);
+        const void* args = nullptr);
+    void draw_string_494C78(
+        drawpixelinfo_t& dpi,
+        int16_t x,
+        int16_t y,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
+    void draw_string_centred(
+        drawpixelinfo_t& dpi,
+        int16_t x,
+        int16_t y,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
+    void draw_string_centred_clipped(
+        drawpixelinfo_t& dpi,
+        int16_t x,
+        int16_t y,
+        int16_t width,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
+    void draw_string_centred_wrapped(
+        drawpixelinfo_t* context,
+        point_t* origin,
+        uint16_t width,
+        uint8_t colour,
+        string_id stringId,
+        const void* args = nullptr);
+
+    void fill_rect(gfx::drawpixelinfo_t* dpi, int16_t left, int16_t top, int16_t right, int16_t bottom, uint32_t colour);
+    void draw_rect(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint16_t dx, uint16_t dy, uint32_t colour);
+    void fill_rect_inset(gfx::drawpixelinfo_t* dpi, int16_t left, int16_t top, int16_t right, int16_t bottom, uint32_t colour, uint8_t flags);
+    void draw_rect_inset(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint16_t dx, uint16_t dy, uint32_t colour, uint8_t flags);
+    void draw_line(gfx::drawpixelinfo_t* dpi, int16_t left, int16_t top, int16_t right, int16_t bottom, uint32_t colour);
+    void draw_image(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint32_t image);
+    void draw_image_solid(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint32_t image, uint8_t palette_index);
+    void draw_image_palette_set(gfx::drawpixelinfo_t* dpi, int16_t x, int16_t y, uint32_t image, uint8_t* palette);
+    uint32_t recolour(uint32_t image);
+    uint32_t recolour(uint32_t image, uint8_t colour);
+
     void invalidate_screen();
     void set_dirty_blocks(int32_t left, int32_t top, int32_t right, int32_t bottom);
+    void draw_dirty_blocks();
+
+    bool clip_drawpixelinfo(gfx::drawpixelinfo_t** dst, gfx::drawpixelinfo_t* src, int16_t x, int16_t y, int16_t width, int16_t height);
+    g1_element* get_g1element(uint32_t id);
 }

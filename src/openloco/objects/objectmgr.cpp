@@ -1,5 +1,6 @@
 #include "objectmgr.h"
 #include "../interop/interop.hpp"
+#include <vector>
 
 using namespace openloco::interop;
 
@@ -38,7 +39,7 @@ namespace openloco::objectmgr
     loco_global<scaffolding_object * [1], 0x0050D070> _scaffoldingObjects;
     loco_global<industry_object * [16], 0x0050D074> _industryObjects;
     loco_global<region_object * [1], 0x0050D0B4> _regionObjects;
-    loco_global<competitors_object * [32], 0x0050D0B8> _competitorsObjects;
+    loco_global<competitor_object * [32], 0x0050D0B8> _competitorObjects;
     loco_global<scenario_text_object * [1], 0x0050D138> _scenarioTextObjects;
 
     // 0x00470F3C
@@ -59,6 +60,12 @@ namespace openloco::objectmgr
     }
 
     template<>
+    sound_object* get(size_t id)
+    {
+        return _soundObjects[id];
+    }
+
+    template<>
     steam_object* get(size_t id)
     {
         return _steamObjects[id];
@@ -67,7 +74,10 @@ namespace openloco::objectmgr
     template<>
     cargo_object* get(size_t id)
     {
-        return _cargoObjects[id];
+        if (_cargoObjects[id] != (cargo_object*)-1)
+            return _cargoObjects[id];
+        else
+            return nullptr;
     }
 
     template<>
@@ -94,44 +104,135 @@ namespace openloco::objectmgr
         return _industryObjects[id];
     }
 
-    size_t get_max_objects(object_type type)
+    template<>
+    currency_object* get()
     {
-        static size_t counts[] = {
-            1,   // interface,
-            128, // sound,
-            1,   // currency,
-            32,  // steam,
-            8,   // rock,
-            1,   // water,
-            32,  // surface,
-            1,   // town_names,
-            32,  // cargo,
-            32,  // wall,
-            16,  // train_signal,
-            4,   // level_crossing,
-            1,   // street_light,
-            16,  // tunnel,
-            8,   // bridge,
-            16,  // train_station,
-            8,   // track_extra,
-            8,   // track,
-            16,  // road_station,
-            4,   // road_extra,
-            8,   // road,
-            8,   // airport,
-            8,   // dock,
-            224, // vehicle,
-            64,  // tree,
-            1,   // snow,
-            1,   // climate,
-            1,   // hill_shapes,
-            128, // building,
-            1,   // scaffolding,
-            16,  // industry,
-            1,   // region,
-            32,  // competitors,
-            1    // scenario_text,
-        };
-        return counts[(size_t)type];
-    };
+        return _currencyObjects[0];
+    }
+
+    template<>
+    track_object* get(size_t id)
+    {
+        return _trackObjects[id];
+    }
+
+    template<>
+    road_object* get(size_t id)
+    {
+        return _roadObjects[id];
+    }
+
+    template<>
+    airport_object* get(size_t id)
+    {
+        return _airportObjects[id];
+    }
+
+    template<>
+    land_object* get(size_t id)
+    {
+        if (_landObjects[id] != (land_object*)-1)
+            return _landObjects[id];
+        else
+            return nullptr;
+    }
+
+    template<>
+    water_object* get()
+    {
+        return _waterObjects[0];
+    }
+
+    template<>
+    competitor_object* get(size_t id)
+    {
+        return _competitorObjects[id];
+    }
+
+    template<>
+    scenario_text_object* get()
+    {
+        if (_scenarioTextObjects[0] != (scenario_text_object*)-1)
+            return _scenarioTextObjects[0];
+        else
+            return nullptr;
+    }
+
+    /*
+    static void printHeader(header data)
+    {
+        printf("(%02X | %02X << 6) ", data.type & 0x3F, data.type >> 6);
+        printf("%02X ", data.pad_01[0]);
+        printf("%02X ", data.pad_01[1]);
+        printf("%02X ", data.pad_01[2]);
+
+        char name[8 + 1] = { 0 };
+        memcpy(name, data.var_04, 8);
+        printf("'%s', ", name);
+
+        printf("%08X ", data.checksum);
+    }
+    */
+
+    object_index_entry object_index_entry::read(std::byte** ptr)
+    {
+        object_index_entry entry{};
+
+        entry._header = (header*)*ptr;
+        *ptr += sizeof(header);
+
+        entry._filename = (char*)*ptr;
+        *ptr += strlen(entry._filename) + 1;
+
+        // decoded_chunk_size
+        //header2* h2 = (header2*)ptr;
+        *ptr += sizeof(header2);
+
+        entry._name = (char*)*ptr;
+        *ptr += strlen(entry._name) + 1;
+
+        //header3* h3 = (header3*)ptr;
+        *ptr += sizeof(header3);
+
+        uint8_t* countA = (uint8_t*)*ptr;
+        *ptr += sizeof(uint8_t);
+        for (int n = 0; n < *countA; n++)
+        {
+            //header* subh = (header*)ptr;
+            *ptr += sizeof(header);
+        }
+
+        uint8_t* countB = (uint8_t*)*ptr;
+        *ptr += sizeof(uint8_t);
+        for (int n = 0; n < *countB; n++)
+        {
+            //header* subh = (header*)ptr;
+            *ptr += sizeof(header);
+        }
+
+        return entry;
+    }
+
+    static loco_global<std::byte*, 0x0050D13C> _installedObjectList;
+    static loco_global<uint32_t, 0x0112A110> _installedObjectCount;
+
+    uint32_t getNumInstalledObjects()
+    {
+        return *_installedObjectCount;
+    }
+
+    std::vector<std::pair<uint32_t, object_index_entry>> getAvailableObjects(object_type type)
+    {
+        auto ptr = (std::byte*)_installedObjectList;
+        std::vector<std::pair<uint32_t, object_index_entry>> list;
+
+        for (uint32_t i = 0; i < _installedObjectCount; i++)
+        {
+            auto entry = object_index_entry::read(&ptr);
+            if (entry._header->get_type() == type)
+                list.emplace_back(std::pair<uint32_t, object_index_entry>(i, entry));
+        }
+
+        return list;
+    }
 }

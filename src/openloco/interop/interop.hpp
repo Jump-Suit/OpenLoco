@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../compat.h"
 #include "../utility/string.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -9,20 +10,13 @@
 
 #define assert_struct_size(x, y) static_assert(sizeof(x) == (y), "Improper struct size")
 
-#if defined(__GNUC__)
+#if defined(__clang__)
 #define FORCE_ALIGN_ARG_POINTER __attribute__((force_align_arg_pointer))
 #else
 #define FORCE_ALIGN_ARG_POINTER
 #endif
 
-#if defined(COMPAT_STD_BYTE)
-namespace std
-{
-    enum class byte : uint8_t
-    {
-    };
-}
-#endif
+constexpr int32_t DEFAULT_REG_VAL = 0xCCCCCCCC;
 
 namespace openloco::interop
 {
@@ -34,7 +28,7 @@ namespace openloco::interop
     {
         union
         {
-            int32_t eax;
+            int32_t eax{ DEFAULT_REG_VAL };
             int16_t ax;
             struct
             {
@@ -44,7 +38,7 @@ namespace openloco::interop
         };
         union
         {
-            int32_t ebx;
+            int32_t ebx{ DEFAULT_REG_VAL };
             int16_t bx;
             struct
             {
@@ -54,7 +48,7 @@ namespace openloco::interop
         };
         union
         {
-            int32_t ecx;
+            int32_t ecx{ DEFAULT_REG_VAL };
             int16_t cx;
             struct
             {
@@ -64,7 +58,7 @@ namespace openloco::interop
         };
         union
         {
-            int32_t edx;
+            int32_t edx{ DEFAULT_REG_VAL };
             int16_t dx;
             struct
             {
@@ -74,21 +68,19 @@ namespace openloco::interop
         };
         union
         {
-            int32_t esi;
+            int32_t esi{ DEFAULT_REG_VAL };
             int16_t si;
         };
         union
         {
-            int32_t edi;
+            int32_t edi{ DEFAULT_REG_VAL };
             int16_t di;
         };
         union
         {
-            int32_t ebp;
+            int32_t ebp{ DEFAULT_REG_VAL };
             int16_t bp;
         };
-
-        registers();
     };
     assert_struct_size(registers, 7 * 4);
 #pragma pack(pop)
@@ -134,10 +126,20 @@ namespace openloco::interop
     template<typename T, uintptr_t TAddress>
     struct loco_global
     {
+    public:
         typedef T type;
         typedef type* pointer;
         typedef type& reference;
         typedef const type& const_reference;
+
+    private:
+        pointer _Myptr;
+
+    public:
+        loco_global()
+        {
+            _Myptr = &(addr<TAddress, T>());
+        }
 
         operator reference()
         {
@@ -165,6 +167,12 @@ namespace openloco::interop
         loco_global& operator&=(const_reference v)
         {
             addr<TAddress, T>() &= v;
+            return *this;
+        }
+
+        loco_global& operator^=(const_reference v)
+        {
+            addr<TAddress, T>() ^= v;
             return *this;
         }
 
@@ -268,11 +276,23 @@ namespace openloco::interop
     template<typename T, size_t TCount, uintptr_t TAddress>
     struct loco_global<T[TCount], TAddress>
     {
+    public:
         typedef T type;
         typedef type* pointer;
         typedef type& reference;
         typedef const type& const_reference;
         typedef loco_global_iterator<T> iterator;
+
+    private:
+        pointer _Myfirst;
+        pointer _Mylast;
+
+    public:
+        loco_global()
+        {
+            _Myfirst = get();
+            _Mylast = _Myfirst + TCount;
+        }
 
         operator pointer()
         {

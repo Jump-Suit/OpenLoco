@@ -6,22 +6,26 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#include "../audio/audio.h"
 #include "../console.h"
 #include "../environment.h"
+#include "../graphics/colours.h"
 #include "../graphics/gfx.h"
 #include "../gui.h"
 #include "../input.h"
+#include "../map/tile.h"
 #include "../platform/platform.h"
 #include "../station.h"
 #include "../things/vehicle.h"
 #include "../ui.h"
+#include "../ui/WindowManager.h"
 #include "../utility/string.hpp"
-#include "../windowmgr.h"
+#include "../viewportmgr.h"
 #include "interop.hpp"
 
 using namespace openloco;
 
-#define STUB() console::log(__FUNCTION__)
+#define STUB() console::log_verbose(__FUNCTION__)
 
 #ifdef _MSC_VER
 #define STDCALL __stdcall
@@ -36,6 +40,37 @@ using namespace openloco;
 #pragma warning(push)
 // MSVC ignores C++17's [[maybe_unused]] attribute on functions, so just disable the warning
 #pragma warning(disable : 4505) // unreferenced local function has been removed.
+
+FORCE_ALIGN_ARG_POINTER
+static int32_t CDECL audio_load_channel(int a0, const char* a1, int a2, int a3, int a4)
+{
+    return audio::load_channel((audio::channel_id)a0, a1, a2) ? 1 : 0;
+}
+
+FORCE_ALIGN_ARG_POINTER
+static int32_t CDECL audio_play_channel(int a0, int a1, int a2, int a3, int a4)
+{
+    return audio::play_channel((audio::channel_id)a0, a1, a2, a3, a4) ? 1 : 0;
+}
+
+FORCE_ALIGN_ARG_POINTER
+static void CDECL audio_stop_channel(int a0, int a1, int a2, int a3, int a4)
+{
+    audio::stop_channel((audio::channel_id)a0);
+}
+
+FORCE_ALIGN_ARG_POINTER
+static void CDECL audio_set_channel_volume(int a0, int a1)
+{
+    audio::set_channel_volume((audio::channel_id)a0, a1);
+}
+
+FORCE_ALIGN_ARG_POINTER
+static int32_t CDECL audio_is_channel_playing(int a0)
+{
+    return audio::is_channel_playing((audio::channel_id)a0) ? 1 : 0;
+}
+
 static void STDCALL fn_40447f()
 {
     STUB();
@@ -91,6 +126,7 @@ static uint32_t STDCALL lib_timeGetTime()
 }
 
 //typedef bool (CALLBACK *LPDSENUMCALLBACKA)(LPGUID, char*, char*, void*);
+FORCE_ALIGN_ARG_POINTER
 static long STDCALL fn_DirectSoundEnumerateA(void* pDSEnumCallback, void* pContext)
 {
     STUB();
@@ -143,7 +179,7 @@ static void CDECL fn_4081ad(int32_t wParam)
 FORCE_ALIGN_ARG_POINTER
 static uint32_t CDECL fn_FileSeekSet(FILE* a0, int32_t distance)
 {
-    console::log("seek %d bytes from current", distance);
+    console::log_verbose("seek %d bytes from start", distance);
     fseek(a0, distance, SEEK_SET);
     return ftell(a0);
 }
@@ -151,7 +187,7 @@ static uint32_t CDECL fn_FileSeekSet(FILE* a0, int32_t distance)
 FORCE_ALIGN_ARG_POINTER
 static uint32_t CDECL fn_FileSeekFromCurrent(FILE* a0, int32_t distance)
 {
-    console::log("seek %d bytes from current", distance);
+    console::log_verbose("seek %d bytes from current", distance);
     fseek(a0, distance, SEEK_CUR);
     return ftell(a0);
 }
@@ -159,7 +195,7 @@ static uint32_t CDECL fn_FileSeekFromCurrent(FILE* a0, int32_t distance)
 FORCE_ALIGN_ARG_POINTER
 static uint32_t CDECL fn_FileSeekFromEnd(FILE* a0, int32_t distance)
 {
-    console::log("seek %d bytes from end", distance);
+    console::log_verbose("seek %d bytes from end", distance);
     fseek(a0, distance, SEEK_END);
     return ftell(a0);
 }
@@ -167,23 +203,10 @@ static uint32_t CDECL fn_FileSeekFromEnd(FILE* a0, int32_t distance)
 FORCE_ALIGN_ARG_POINTER
 static int32_t CDECL fn_FileRead(FILE* a0, char* buffer, int32_t size)
 {
-    console::log("read %d bytes (%d)", size, fileno(a0));
+    console::log_verbose("read %d bytes (%d)", size, fileno(a0));
     size = fread(buffer, 1, size, a0);
 
     return size;
-}
-
-FORCE_ALIGN_ARG_POINTER
-static int CDECL fn_CloseHandle(FILE* file)
-{
-    // STUB();
-    if (file == nullptr)
-    {
-        return 1;
-    }
-
-    fclose(file);
-    return 0;
 }
 
 typedef struct FindFileData
@@ -206,19 +229,16 @@ public:
     std::vector<openloco::environment::fs::path> fileList;
 };
 
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+
 FORCE_ALIGN_ARG_POINTER
 static Session* CDECL fn_FindFirstFile(char* lpFileName, FindFileData* out)
 {
-    console::log("%s (%s)", __FUNCTION__, lpFileName);
+    console::log_verbose("%s (%s)", __FUNCTION__, lpFileName);
 
     Session* data = new Session;
 
     openloco::environment::fs::path path = lpFileName;
-#ifdef _OPENLOCO_USE_BOOST_FS_
-    std::string format = path.filename().string();
-#else
-    std::string format = path.filename().u8string();
-#endif
     path.remove_filename();
 
     openloco::environment::fs::directory_iterator iter(path), end;
@@ -234,6 +254,16 @@ static Session* CDECL fn_FindFirstFile(char* lpFileName, FindFileData* out)
 #else
     utility::strcpy_safe(out->cFilename, data->fileList[0].filename().u8string().c_str());
 #endif
+
+    if (openloco::environment::fs::is_directory(data->fileList[0]))
+    {
+        out->dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
+    }
+    else
+    {
+        out->dwFileAttributes &= ~FILE_ATTRIBUTE_DIRECTORY;
+    }
+
     data->fileList.erase(data->fileList.begin());
     return data;
 }
@@ -252,6 +282,16 @@ static bool CDECL fn_FindNextFile(Session* data, FindFileData* out)
 #else
     utility::strcpy_safe(out->cFilename, data->fileList[0].filename().u8string().c_str());
 #endif
+
+    if (openloco::environment::fs::is_directory(data->fileList[0]))
+    {
+        out->dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
+    }
+    else
+    {
+        out->dwFileAttributes &= ~FILE_ATTRIBUTE_DIRECTORY;
+    }
+
     data->fileList.erase(data->fileList.begin());
 
     return true;
@@ -330,6 +370,7 @@ static uint32_t STDCALL lib_DirectSoundCreate(void* lpGuid, void* ppDS, void* pU
     return DSERR_NODRIVER;
 }
 
+FORCE_ALIGN_ARG_POINTER
 static uint32_t STDCALL lib_CreateRectRgn(int x1, int y1, int x2, int y2)
 {
     console::log("CreateRectRgn(%d, %d, %d, %d)", x1, y1, x2, y2);
@@ -356,6 +397,7 @@ static bool STDCALL lib_DeleteFileA(char* lpFileName)
     return false;
 }
 
+FORCE_ALIGN_ARG_POINTER
 static bool STDCALL lib_WriteFile(
     FILE* hFile,
     char* buffer,
@@ -363,7 +405,8 @@ static bool STDCALL lib_WriteFile(
     uint32_t* lpNumberOfBytesWritten,
     uintptr_t lpOverlapped)
 {
-    console::log("WriteFile(%s)", buffer);
+    *lpNumberOfBytesWritten = fwrite(buffer, 1, nNumberOfBytesToWrite, hFile);
+    console::log_verbose("WriteFile(%s)", buffer);
 
     return true;
 }
@@ -387,7 +430,7 @@ static int32_t STDCALL lib_CreateFileA(
     uint32_t dwFlagsAndAttributes,
     uintptr_t hTemplateFile)
 {
-    console::log("CreateFile(%s, 0x%x, 0x%x)", lpFileName, dwDesiredAccess, dwCreationDisposition);
+    console::log_verbose("CreateFile(%s, 0x%x, 0x%x)", lpFileName, dwDesiredAccess, dwCreationDisposition);
 
     FILE* pFILE = nullptr;
     if (dwDesiredAccess == GENERIC_READ && dwCreationDisposition == OPEN_EXISTING)
@@ -440,9 +483,12 @@ static void* STDCALL lib_CreateMutexA(uintptr_t lmMutexAttributes, bool bInitial
     return nullptr;
 }
 
-static void STDCALL lib_CloseHandle(int a0)
+FORCE_ALIGN_ARG_POINTER
+static bool STDCALL lib_CloseHandle(void* hObject)
 {
-    console::log("CloseHandle(%d)", a0);
+    auto file = (FILE*)hObject;
+
+    return fclose(file) == 0;
 }
 
 FORCE_ALIGN_ARG_POINTER
@@ -452,6 +498,17 @@ static void STDCALL lib_PostQuitMessage(int32_t exitCode)
     exit(exitCode);
 }
 #pragma warning(pop)
+
+static void register_memory_hooks()
+{
+    using namespace openloco::interop;
+
+    // Hook Locomotion's alloc / free routines so that we don't
+    // allocate a block in one module and freeing it in another.
+    write_jmp(0x4d1401, (void*)&fn_malloc);
+    write_jmp(0x4D1B28, (void*)&fn_realloc);
+    write_jmp(0x4D1355, (void*)&fn_free);
+}
 
 #ifdef _NO_LOCO_WIN32_
 static void register_no_win32_hooks()
@@ -464,9 +521,6 @@ static void register_no_win32_hooks()
     write_jmp(0x4054b9, (void*)&fn_4054b9);
     write_jmp(0x4064fa, (void*)&fn0);
     write_jmp(0x40726d, (void*)&fn_40726d);
-    write_jmp(0x4d1401, (void*)&fn_malloc);
-    write_jmp(0x4D1B28, (void*)&fn_realloc);
-    write_jmp(0x4D1355, (void*)&fn_free);
     write_jmp(0x4054a3, (void*)&fn_4054a3);
     write_jmp(0x4072ec, (void*)&fn0);
     write_jmp(0x4078be, (void*)&fn_4078be);
@@ -480,15 +534,10 @@ static void register_no_win32_hooks()
     write_jmp(0x4081d8, (void*)&fn_FileSeekFromCurrent);
     write_jmp(0x4081eb, (void*)&fn_FileSeekFromEnd);
     write_jmp(0x4081fe, (void*)&fn_FileRead);
-    write_jmp(0x408297, (void*)&fn_CloseHandle);
     write_jmp(0x40830e, (void*)&fn_FindFirstFile);
     write_jmp(0x40831d, (void*)&fn_FindNextFile);
     write_jmp(0x40832c, (void*)&fn_FindClose);
     write_jmp(0x4d0fac, (void*)&fn_DirectSoundEnumerateA);
-
-    // sound
-    write_ret(0x489cb5); // audio::play_sound
-    write_ret(0x489f1b); // audio::play_sound
 
     // fill DLL hooks for ease of debugging
     for (int i = 0x4d7000; i <= 0x4d72d8; i += 4)
@@ -535,13 +584,117 @@ void openloco::interop::load_sections()
 #endif
 }
 
+static void register_terraform_hooks()
+{
+    /* Event 1: clear tool
+    ------------------------*/
+    // Remove size limit outside of scenario editor: will always be 10 instead of 5.
+    interop::write_nop(0x4BC75B, 0x4BC779 - 0x4BC75B);
+
+    // Resize window to fit fifth tab.
+    interop::write_nop(0x4BC7CF, 0x4BC7DA - 0x4BC7CF);
+
+    /* Event 2: land tool
+    -----------------------*/
+    // Enable soil selection
+    // TODO: doesn't have any effect yet, and is in the way.
+    // interop::write_nop(0x4BC8CE, 0x4BC8D7 - 0x4BC8CE);
+
+    // Remove decrease size limit: enable mountain tool outside of scenario editor.
+    interop::write_nop(0x4BCA9E, 0x4BCAB1 - 0x4BCA9E);
+
+    // Remove increase size limit: will always be 10 instead of 5.
+    interop::write_nop(0x4BCADC, 0x4BCAFA - 0x4BCADC);
+
+    // Resize window to fit fifth tab.
+    interop::write_nop(0x4BCC01, 0x4BCC0C - 0x4BCC01);
+
+    /* Event 3: water tool
+    ------------------------*/
+    // Remove size limit outside of scenario editor: will always be 10 instead of 5.
+    interop::write_nop(0x4BCE49, 0x4BCE67 - 0x4BCE49);
+
+    // Resize window to fit fifth tab.
+    interop::write_nop(0x4BCEBD, 0x4BCEC8 - 0x4BCEBD);
+
+    /* Event 4: trees and forests
+    -------------------------------*/
+    // Enable forest placement outside of scenario editor.
+    // TODO: placing a forest currently does not cost any money.
+    interop::write_nop(0x4BB8AA, 0x4BB8B5 - 0x4BB8AA);
+
+    /* Event 5: fences
+    --------------------*/
+    // Don't disable fences tab
+    interop::write_nop(0x4BCF6B, 0x4BCF7B - 0x4BCF6B);
+}
+
+static void register_audio_hooks()
+{
+    using namespace openloco::interop;
+
+    write_jmp(0x0040194E, (void*)&audio_load_channel);
+    write_jmp(0x00401999, (void*)&audio_play_channel);
+    write_jmp(0x00401A05, (void*)&audio_stop_channel);
+    write_jmp(0x00401AD3, (void*)&audio_set_channel_volume);
+    write_jmp(0x00401B10, (void*)&audio_is_channel_playing);
+
+    write_ret(0x0048AB36);
+    write_ret(0x00404B40);
+    register_hook(
+        0x0048A18C,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            audio::update_sounds();
+            return 0;
+        });
+    register_hook(
+        0x00489C6A,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            audio::stop_vehicle_noise();
+            return 0;
+        });
+    register_hook(
+        0x0048A4BF,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            audio::play_sound((vehicle*)regs.esi);
+            return 0;
+        });
+    register_hook(
+        0x00489CB5,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            audio::play_sound((audio::sound_id)regs.eax, { regs.cx, regs.dx, regs.bp }, regs.ebx);
+            return 0;
+        });
+    register_hook(
+        0x00489F1B,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            audio::play_sound((audio::sound_id)regs.eax, { regs.cx, regs.dx, regs.bp }, regs.edi, regs.ebx);
+            return 0;
+        });
+}
+
 void openloco::interop::register_hooks()
 {
     using namespace openloco::ui::windows;
 
+    register_memory_hooks();
+
 #ifdef _NO_LOCO_WIN32_
     register_no_win32_hooks();
 #endif // _NO_LOCO_WIN32_
+
+    register_terraform_hooks();
+    register_audio_hooks();
+
+    register_hook(
+        0x00431695,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+
+            openloco::sub_431695(0);
+            regs = backup;
+            return 0;
+        });
 
     register_hook(
         0x004416B5,
@@ -576,22 +729,12 @@ void openloco::interop::register_hooks()
             ui::set_cursor(cursor);
             return 0;
         });
-    register_hook(
-        0x004CF142,
-        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            ui::set_cursor(ui::cursor_id::blank);
-            return 0;
-        });
 
+    // Keep until editor toolbar has been implemented.
     register_hook(
-        0x00445AB9,
+        0x0043B26C,
         [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            auto result = prompt_browse(
-                (browse_type)regs.al,
-                (char*)regs.ecx,
-                (const char*)regs.edx,
-                (const char*)regs.ebx);
-            regs.eax = result ? 1 : 0;
+            ui::about::open();
             return 0;
         });
 
@@ -604,12 +747,6 @@ void openloco::interop::register_hooks()
         });
 
     register_hook(
-        0x00407218,
-        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            openloco::input::sub_407218();
-            return 0;
-        });
-    register_hook(
         0x00407231,
         [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
             openloco::input::sub_407231();
@@ -617,25 +754,48 @@ void openloco::interop::register_hooks()
         });
 
     register_hook(
+        0x00451025,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+            auto pos = gfx::draw_string((gfx::drawpixelinfo_t*)regs.edi, regs.cx, regs.dx, regs.al, (uint8_t*)regs.esi);
+            regs = backup;
+            regs.cx = pos.x;
+            regs.dx = pos.y;
+
+            return 0;
+        });
+
+    // Until handling of input_state::viewport_left has been implemented in mouse_input...
+    register_hook(
+        0x00490F6C,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            ui::windows::station_list::open(regs.ax);
+            return 0;
+        });
+
+    register_hook(
+        0x004958C6,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+            char* buffer = stringmgr::format_string((char*)regs.edi, regs.eax, (void*)regs.ecx);
+            regs = backup;
+            regs.edi = (uint32_t)buffer;
+            return 0;
+        });
+
+    register_hook(
         0x0049D3F6,
         [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            ui::windows::construction_mouse_up(*((ui::window*)regs.esi), regs.dx);
+            ui::windows::construction::on_mouse_up(*((ui::window*)regs.esi), regs.dx);
             return 0;
         });
 
     register_hook(
         0x0048ED2F,
         [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            ui::windows::station_2_scroll_paint(
+            ui::windows::station::tab_2_scroll_paint(
                 *((ui::window*)regs.esi),
                 *((gfx::drawpixelinfo_t*)regs.edi));
-            return 0;
-        });
-
-    register_hook(
-        0x00498E9B,
-        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-            openloco::ui::windows::sub_498E9B((openloco::ui::window*)regs.esi);
             return 0;
         });
 
@@ -654,13 +814,47 @@ void openloco::interop::register_hooks()
             return 0;
         });
 
+    register_hook(
+        0x004CA4DF,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+            auto window = (ui::window*)regs.esi;
+            auto dpi = (gfx::drawpixelinfo_t*)regs.edi;
+            window->draw(dpi);
+            regs = backup;
+            return 0;
+        });
+
+    ui::prompt_browse::register_hooks();
+    ui::textinput::register_hooks();
     ui::tooltip::register_hooks();
+    ui::vehicle::registerHooks();
+    ui::build_vehicle::registerHooks();
+    ui::WindowManager::registerHooks();
+    ui::viewportmgr::registerHooks();
+
+    // Part of 0x004691FA
+    register_hook(
+        0x0046959C,
+        [](registers& regs) -> uint8_t {
+            registers backup = regs;
+            int16_t x = regs.eax;
+            int16_t i = regs.ebx / 6;
+            int16_t y = regs.ecx;
+            openloco::map::surface_element* surface = (openloco::map::surface_element*)regs.esi;
+
+            surface->createWave(x, y, i);
+
+            regs = backup;
+            return 0;
+        });
 
     register_hook(
         0x004AB655,
         [](registers& regs) -> uint8_t {
             auto v = (openloco::vehicle*)regs.esi;
             v->secondary_animation_update();
+
             return 0;
         });
 
@@ -671,9 +865,93 @@ void openloco::interop::register_hooks()
             return 0;
         });
 
+    register_hook(
+        0x004C6456,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+            auto window = (ui::window*)regs.esi;
+            window->viewports_update_position();
+            regs = backup;
+            return 0;
+        });
+
+    register_hook(
+        0x004C9513,
+        [](registers& regs) -> uint8_t {
+            registers backup = regs;
+            auto window = (ui::window*)regs.esi;
+            int16_t x = regs.ax;
+            int16_t y = regs.bx;
+
+            auto widgetIndex = window->find_widget_at(x, y);
+
+            regs = backup;
+            regs.edx = widgetIndex;
+            if (widgetIndex == -1)
+            {
+                regs.edi = (uintptr_t)&window->widgets[0];
+            }
+            else
+            {
+                regs.edi = (uintptr_t)&window->widgets[widgetIndex];
+            }
+
+            return 0;
+        });
+
+    register_hook(
+        0x004CA115,
+        [](registers& regs) -> uint8_t {
+            registers backup = regs;
+            auto window = (ui::window*)regs.esi;
+            window->update_scroll_widgets();
+            regs = backup;
+
+            return 0;
+        });
+
+    register_hook(
+        0x004CA17F,
+        [](registers& regs) -> uint8_t {
+            registers backup = regs;
+            auto window = (ui::window*)regs.esi;
+            window->init_scroll_widgets();
+            regs = backup;
+
+            return 0;
+        });
+
+    // Keep until editor toolbar has been implemented.
+    register_hook(
+        0x00004BF7B9,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            ui::options::open();
+
+            return 0;
+        });
+
+    // Keep until editor toolbar has been implemented.
+    register_hook(
+        0x00004BF7B9,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            ui::options::open_music_settings();
+
+            return 0;
+        });
+
+    register_hook(
+        0x004C57C0,
+        [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
+            registers backup = regs;
+
+            initialise_viewports();
+            regs = backup;
+            return 0;
+        });
+
     // Remove the set window pos function, we do not want it as it
     // keeps moving the process window to 0, 0
-    // Can be removed when windowmgr:update() is hooked
+    // Can be removed when WindowManager:update() is hooked
     write_ret(0x00406520);
 
     // Remove check for is road in use when removing roads. It is

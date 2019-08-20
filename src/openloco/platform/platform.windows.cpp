@@ -57,7 +57,7 @@ namespace openloco::platform
         if (SUCCEEDED(CoInitializeEx(0, COINIT_APARTMENTTHREADED)) && SUCCEEDED(SHGetMalloc(&lpMalloc)))
         {
             auto titleW = utility::to_utf16(title);
-            BROWSEINFOW bi = { 0 };
+            BROWSEINFOW bi{};
             bi.lpszTitle = titleW.c_str();
             bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_NONEWFOLDERBUTTON;
 
@@ -79,6 +79,41 @@ namespace openloco::platform
         ShowWindow((HWND)ui::hwnd(), SW_RESTORE);
 
         return result;
+    }
+
+    static std::string WIN32_GetModuleFileNameW(HMODULE hModule)
+    {
+        uint32_t wExePathCapacity = MAX_PATH;
+        std::unique_ptr<wchar_t[]> wExePath;
+        uint32_t size;
+        do
+        {
+            wExePathCapacity *= 2;
+            wExePath = std::make_unique<wchar_t[]>(wExePathCapacity);
+            size = GetModuleFileNameW(hModule, wExePath.get(), wExePathCapacity);
+        } while (size >= wExePathCapacity);
+        return utility::to_utf8(wExePath.get());
+    }
+
+    fs::path GetCurrentExecutablePath()
+    {
+        return WIN32_GetModuleFileNameW(nullptr);
+    }
+
+    std::vector<fs::path> getDrives()
+    {
+        char drive[4] = { 'A', ':', '\0' };
+        std::vector<fs::path> drives;
+        auto driveMask = GetLogicalDrives();
+        for (auto i = 0; i < 26; i++)
+        {
+            if (driveMask & (1 << i))
+            {
+                drive[0] = 'A' + i;
+                drives.push_back(drive);
+            }
+        }
+        return drives;
     }
 }
 

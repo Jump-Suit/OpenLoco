@@ -1,10 +1,13 @@
 #include "station.h"
 #include "companymgr.h"
 #include "interop/interop.hpp"
+#include "localisation/string_ids.h"
 #include "messagemgr.h"
+#include "objects/cargo_object.h"
+#include "objects/objectmgr.h"
 #include "openloco.h"
-#include "windowmgr.h"
-#include <algorithm>
+#include "ui/WindowManager.h"
+#include "viewportmgr.h"
 
 using namespace openloco::interop;
 using namespace openloco::ui;
@@ -95,6 +98,34 @@ namespace openloco
         call(0x0048F7D1, regs);
     }
 
+    // 0x00492A98
+    void station::getStatusString(const char* buffer)
+    {
+        char* ptr = (char*)buffer;
+        *ptr = '\0';
+
+        for (uint32_t cargoId = 0; cargoId < max_cargo_stats; cargoId++)
+        {
+            auto& stats = cargo_stats[cargoId];
+
+            if (stats.quantity == 0)
+                continue;
+
+            if (*buffer != '\0')
+                ptr = stringmgr::format_string(ptr, string_ids::waiting_cargo_separator);
+
+            loco_global<uint32_t, 0x112C826> _common_format_args;
+            *_common_format_args = stats.quantity;
+
+            auto cargo = objectmgr::get<cargo_object>(cargoId);
+            string_id unit_name = stats.quantity == 1 ? cargo->unit_name_singular : cargo->unit_name_plural;
+            ptr = stringmgr::format_string(ptr, unit_name, &*_common_format_args);
+        }
+
+        string_id suffix = *buffer == '\0' ? string_ids::nothing_waiting : string_ids::waiting;
+        ptr = stringmgr::format_string(ptr, suffix);
+    }
+
     // 0x00492793
     bool station::update_cargo()
     {
@@ -152,8 +183,8 @@ namespace openloco
 
         sub_4929DB();
 
-        auto w = windowmgr::find(window_type::station, id());
-        if (w != nullptr && (w->var_870 == 2 || w->var_870 == 1 || quantityUpdated))
+        auto w = WindowManager::find(WindowType::station, id());
+        if (w != nullptr && (w->current_tab == 2 || w->current_tab == 1 || quantityUpdated))
         {
             w->invalidate();
         }
@@ -161,6 +192,7 @@ namespace openloco
         return atLeastOneGoodRating;
     }
 
+    // 0x004927F6
     int32_t station::calculate_cargo_rating(const station_cargo_stats& cargo) const
     {
         int32_t rating = 0;
@@ -206,9 +238,9 @@ namespace openloco
             }
         }
 
-        if (var_2A != 384 && is_player_company(owner))
+        if ((flags & (station_flags::flag_7 | station_flags::flag_8)) == 0 && !is_player_company(owner))
         {
-            rating += 120;
+            rating = 120;
         }
 
         int32_t unk3 = std::min<uint8_t>(cargo.var_36, 250);
@@ -243,13 +275,11 @@ namespace openloco
     // 0x004CBA2D
     void station::invalidate()
     {
-        registers regs;
-        regs.esi = (int32_t)this;
-        call(0x004CBA2D, regs);
+        ui::viewportmgr::invalidate(this);
     }
 
     void station::invalidate_window()
     {
-        windowmgr::invalidate(window_type::station, id());
+        WindowManager::invalidate(WindowType::station, id());
     }
 }

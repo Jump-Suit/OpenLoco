@@ -1,9 +1,10 @@
+#include "../audio/audio.h"
 #include "../graphics/colours.h"
 #include "../input.h"
 #include "../interop/interop.hpp"
 #include "../openloco.h"
 #include "../ui.h"
-#include "../windowmgr.h"
+#include "../ui/WindowManager.h"
 #include <cstring>
 
 using namespace openloco::interop;
@@ -36,31 +37,35 @@ namespace openloco::ui::windows
         std::memcpy(buffers.description, byte_112CE04, 512);
         _text_buffers = &buffers;
 
-        auto window = windowmgr::create_window_centred(window_type::prompt_ok_cancel, 280, 92, ui::window_flags::flag_12 | ui::window_flags::flag_1, (void*)0x004FB37C);
+        auto window = WindowManager::createWindowCentred(
+            WindowType::confirmationPrompt,
+            { 280, 92 },
+            ui::window_flags::flag_12 | ui::window_flags::stick_to_front,
+            (ui::window_event_list*)0x004FB37C);
         if (window != nullptr)
         {
-            window->widgets = (widget*)0x0050AE00;
+            window->widgets = (widget_t*)0x0050AE00;
             window->enabled_widgets = (1 << 2) | (1 << 3) | (1 << 4);
-            window->sub_4CA17F();
+            window->init_scroll_widgets();
             window->colours[0] = colour::translucent(colour::salmon_pink);
             window->colours[1] = colour::translucent(colour::salmon_pink);
-            window->flags |= ui::window_flags::flag_4;
+            window->flags |= ui::window_flags::transparent;
             _result = 0;
 
-            auto originalModal = windowmgr::current_modal_type();
-            windowmgr::current_modal_type(window_type::prompt_ok_cancel);
+            auto originalModal = WindowManager::getCurrentModalType();
+            WindowManager::setCurrentModalType(WindowType::confirmationPrompt);
             prompt_tick_loop(
                 []() {
                     input::handle_keyboard();
-                    sub_48A18C();
-                    call(0x004CD3D0);
-                    call(0x004BEC5B);
-                    windowmgr::update();
-                    call(0x004C98CF);
+                    audio::update_sounds();
+                    WindowManager::dispatchUpdateAll();
+                    input::process_keyboard_input();
+                    WindowManager::update();
+                    ui::minimalHandleInput();
                     call(0x004CF63B);
-                    return windowmgr::find(window_type::prompt_ok_cancel) != nullptr;
+                    return WindowManager::find(WindowType::confirmationPrompt) != nullptr;
                 });
-            windowmgr::current_modal_type(originalModal);
+            WindowManager::setCurrentModalType(originalModal);
             return _result != 0;
         }
         return false;

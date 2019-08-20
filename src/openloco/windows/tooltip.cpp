@@ -3,7 +3,7 @@
 #include "../objects/interface_skin_object.h"
 #include "../objects/objectmgr.h"
 #include "../ui.h"
-#include "../windowmgr.h"
+#include "../ui/WindowManager.h"
 #include <algorithm>
 #include <cstring>
 
@@ -14,20 +14,23 @@ namespace openloco::ui::tooltip
     static loco_global<char[513], 0x0050ED4B> _str0337;
 
     static loco_global<int8_t, 0x0052336E> _52336E; // bool
-    static loco_global<window_type, 0x00523381> _523381;
-    static loco_global<int16_t, 0x00523382> _523382;
-    static loco_global<int16_t, 0x00523384> _523384;
+
+    static loco_global<WindowType, 0x00523381> _tooltipWindowType;
+    static loco_global<window_number, 0x00523382> _tooltipWindowNumber;
+    static loco_global<int16_t, 0x00523384> _tooltipWidgetIndex;
+
     static loco_global<uint16_t, 0x0052338C> _tooltipNotShownTicks;
 
-    static loco_global<ui::widget[1], 0x005234CC> _widgets;
+    static loco_global<ui::widget_t[1], 0x005234CC> _widgets;
 
+    static loco_global<char[1], 0x112C826> _commonFormatArgs;
     static loco_global<int32_t, 0x112C876> gCurrentFontSpriteBase;
     static loco_global<char[512], 0x0112CC04> byte_112CC04;
 
     static loco_global<char[512], 0x01136D90> _text;
     static loco_global<uint16_t, 0x01136F90> _lineBreakCount;
 
-    static loco_global<int32_t, 0x01136F98> _1136F98;
+    static loco_global<int32_t, 0x01136F98> _currentTooltipStringId;
 
     static void draw(ui::window* window, gfx::drawpixelinfo_t* dpi);
     static void on_close(ui::window* window);
@@ -44,7 +47,7 @@ namespace openloco::ui::tooltip
         register_hook(
             0x004C9216,
             [](registers& regs) FORCE_ALIGN_ARG_POINTER -> uint8_t {
-                ui::tooltip::update((ui::window*)regs.esi, regs.edx, regs.ax, regs.bx);
+                ui::tooltip::update((ui::window*)regs.esi, regs.edx, regs.di, regs.ax, regs.bx);
                 return 0;
             });
         register_hook(
@@ -67,18 +70,11 @@ namespace openloco::ui::tooltip
             });
     }
 
-    static void common(const window* window, int32_t widgetIndex, int16_t cursorX, int16_t cursorY)
+    static void common(const window* window, int32_t widgetIndex, string_id stringId, int16_t cursorX, int16_t cursorY)
     {
-        {
-            // format_string
-            registers regs;
-            regs.eax = window->widgets[widgetIndex].tooltip;
-            regs.edi = (uint32_t)&byte_112CC04[0];
-            regs.ecx = 0x112C826;
-            call(0x004958C6, regs);
-        }
+        stringmgr::format_string(byte_112CC04, stringId, _commonFormatArgs);
 
-        gCurrentFontSpriteBase = 224;
+        gCurrentFontSpriteBase = font::medium_bold;
         int16_t strWidth;
         {
             // gfx_get_string_width_new_lined
@@ -89,7 +85,7 @@ namespace openloco::ui::tooltip
         }
         strWidth = std::max<int16_t>(strWidth, 196);
 
-        gCurrentFontSpriteBase = 224;
+        gCurrentFontSpriteBase = font::medium_bold;
         {
             // gfx_wrap_string
             registers regs;
@@ -119,14 +115,12 @@ namespace openloco::ui::tooltip
 
         x = std::clamp(cursorX - (width / 2), 0, ui::width() - width);
 
-        auto tooltip = windowmgr::create_window(
-            window_type::tooltip,
-            x,
-            y,
-            width,
-            height,
-            window_flags::flag_1 | window_flags::flag_4 | window_flags::flag_7,
-            (void*)0x504774);
+        auto tooltip = WindowManager::createWindow(
+            WindowType::tooltip,
+            gfx::point_t(x, y),
+            gfx::ui_size_t(width, height),
+            window_flags::stick_to_front | window_flags::transparent | window_flags::flag_7,
+            (ui::window_event_list*)0x504774);
         tooltip->widgets = _widgets;
         _tooltipNotShownTicks = 0;
     }
@@ -134,7 +128,7 @@ namespace openloco::ui::tooltip
     // 0x004C906B
     void open(ui::window* window, int32_t widgetIndex, int16_t cursorX, int16_t cursorY)
     {
-        windowmgr::close(window_type::tooltip, 0);
+        WindowManager::close(WindowType::tooltip, 0);
         if (window == nullptr || widgetIndex == -1)
         {
             return;
@@ -146,9 +140,9 @@ namespace openloco::ui::tooltip
             return;
         }
 
-        _523381 = window->type;
-        _523382 = window->number;
-        _523384 = widgetIndex;
+        _tooltipWindowType = window->type;
+        _tooltipWindowNumber = window->number;
+        _tooltipWidgetIndex = widgetIndex;
 
         auto showString = window->call_tooltip(widgetIndex);
         if (!showString)
@@ -156,25 +150,25 @@ namespace openloco::ui::tooltip
             return;
         }
 
-        auto wnd = windowmgr::find(window_type::wt_12, 0);
+        auto wnd = WindowManager::find(WindowType::error, 0);
         if (wnd != nullptr)
         {
             return;
         }
 
-        _1136F98 = -1;
+        _currentTooltipStringId = -1;
 
-        common(window, widgetIndex, cursorX, cursorY);
+        common(window, widgetIndex, window->widgets[widgetIndex].tooltip, cursorX, cursorY);
     }
 
     // 0x004C9216
-    void update(ui::window* window, int32_t widgetIndex, int16_t cursorX, int16_t cursorY)
+    void update(ui::window* window, int32_t widgetIndex, string_id stringId, int16_t cursorX, int16_t cursorY)
     {
-        windowmgr::close(window_type::tooltip, 0);
+        WindowManager::close(WindowType::tooltip, 0);
 
-        _523381 = window->type;
-        _523382 = window->number;
-        _523384 = widgetIndex;
+        _tooltipWindowType = window->type;
+        _tooltipWindowNumber = window->number;
+        _tooltipWidgetIndex = widgetIndex;
 
         auto showString = window->call_tooltip(widgetIndex);
         if (!showString)
@@ -182,15 +176,15 @@ namespace openloco::ui::tooltip
             return;
         }
 
-        auto wnd = windowmgr::find(window_type::wt_12, 0);
+        auto wnd = WindowManager::find(WindowType::error, 0);
         if (wnd != nullptr)
         {
             return;
         }
 
-        _1136F98 = (uint32_t)&window->widgets[widgetIndex];
+        _currentTooltipStringId = stringId;
 
-        common(window, widgetIndex, cursorX, cursorY);
+        common(window, widgetIndex, stringId, cursorX, cursorY);
     }
 
     // 0x004C9397

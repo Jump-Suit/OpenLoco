@@ -11,9 +11,11 @@
 #include <windows.h>
 #endif
 
+#include "config.convert.hpp"
 #include "config.h"
 #include "environment.h"
 #include "interop/interop.hpp"
+#include "utility/yaml.hpp"
 
 using namespace openloco::interop;
 
@@ -27,6 +29,7 @@ namespace openloco::config
 {
     static loco_global<config_t, 0x0050AEB4> _config;
     static new_config _new_config;
+    static YAML::Node _config_yaml;
 
     config_t& get()
     {
@@ -54,27 +57,55 @@ namespace openloco::config
 
     new_config& read_new_config()
     {
-        auto configPath = environment::get_path(environment::path_id::openloco_cfg);
-#ifdef _OPENLOCO_USE_BOOST_FS_
-        std::ifstream stream(configPath.string());
-#else
-        std::ifstream stream(configPath);
-#endif
-        if (stream.is_open())
+        auto configPath = environment::get_path(environment::path_id::openloco_yml);
+
+        if (!fs::exists(configPath))
+            return _new_config;
+
+        // WARNING: on Windows, YAML::LoadFile only supports ANSI paths
+        _config_yaml = YAML::LoadFile(configPath.string());
+
+        const auto& config = _config_yaml;
+        auto& displayNode = config["display"];
+        if (displayNode && displayNode.IsMap())
         {
-            std::getline(stream, _new_config.loco_install_path);
-            stream >> _new_config.breakdowns_disabled;
+            auto& displayConfig = _new_config.display;
+            displayConfig.mode = displayNode["mode"].as<screen_mode>(screen_mode::window);
+            displayConfig.index = displayNode["index"].as<int32_t>(0);
+            displayConfig.window_resolution = displayNode["window_resolution"].as<resolution_t>();
+            displayConfig.fullscreen_resolution = displayNode["fullscreen_resolution"].as<resolution_t>();
         }
+
+        auto& audioNode = config["audio"];
+        if (audioNode && audioNode.IsMap())
+        {
+            auto& audioConfig = _new_config.audio;
+            audioConfig.device = audioNode["device"].as<std::string>("");
+            if (audioNode["play_title_music"])
+                audioConfig.play_title_music = audioNode["play_title_music"].as<bool>();
+        }
+
+        if (config["loco_install_path"])
+            _new_config.loco_install_path = config["loco_install_path"].as<std::string>();
+        if (config["language"])
+            _new_config.language = config["language"].as<std::string>();
+        if (config["breakdowns_disabled"])
+            _new_config.breakdowns_disabled = config["breakdowns_disabled"].as<bool>();
+        if (config["scale_factor"])
+            _new_config.scale_factor = config["scale_factor"].as<float>();
+        if (config["zoom_to_cursor"])
+            _new_config.zoom_to_cursor = config["zoom_to_cursor"].as<bool>();
+
         return _new_config;
     }
 
     void write_new_config()
     {
-        auto configPath = environment::get_path(environment::path_id::openloco_cfg);
+        auto configPath = environment::get_path(environment::path_id::openloco_yml);
         auto dir = configPath.parent_path();
         if (!fs::is_directory(dir))
         {
-            fs::create_directories(configPath.parent_path());
+            fs::create_directories(dir);
             // clang-format off
             fs::permissions(
                 dir,
@@ -90,6 +121,41 @@ namespace openloco::config
             // clang-format on
         }
 
+        auto& node = _config_yaml;
+
+        // Display
+        const auto& displayConfig = _new_config.display;
+        auto displayNode = node["display"];
+        displayNode["mode"] = displayConfig.mode;
+        if (displayConfig.index != 0)
+        {
+            displayNode["index"] = displayConfig.index;
+        }
+        else
+        {
+            displayNode.remove("index");
+        }
+        displayNode["window_resolution"] = displayConfig.window_resolution;
+        displayNode["fullscreen_resolution"] = displayConfig.fullscreen_resolution;
+        node["display"] = displayNode;
+
+        // Audio
+        const auto& audioConfig = _new_config.audio;
+        auto audioNode = node["audio"];
+        audioNode["device"] = audioConfig.device;
+        if (audioConfig.device.empty())
+        {
+            audioNode.remove("device");
+        }
+        audioNode["play_title_music"] = audioConfig.play_title_music;
+        node["audio"] = audioNode;
+
+        node["loco_install_path"] = _new_config.loco_install_path;
+        node["language"] = _new_config.language;
+        node["breakdowns_disabled"] = _new_config.breakdowns_disabled;
+        node["scale_factor"] = _new_config.scale_factor;
+        node["zoom_to_cursor"] = _new_config.zoom_to_cursor;
+
 #ifdef _OPENLOCO_USE_BOOST_FS_
         std::ofstream stream(configPath.string());
 #else
@@ -97,8 +163,7 @@ namespace openloco::config
 #endif
         if (stream.is_open())
         {
-            stream << _new_config.loco_install_path << std::endl;
-            stream << _new_config.breakdowns_disabled << std::endl;
+            stream << node << std::endl;
         }
     }
 }

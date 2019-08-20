@@ -97,23 +97,23 @@ bool vehicle::update()
     regs.esi = (int32_t)this;
     switch (type)
     {
-        case thing_type::exhaust:
+        case vehicle_thing_type::vehicle_0:
             result = call(0x004A8B81, regs);
             break;
-        case thing_type::vehicle_1:
+        case vehicle_thing_type::vehicle_1:
             result = call(0x004A9788, regs);
             break;
-        case thing_type::vehicle_2:
+        case vehicle_thing_type::vehicle_2:
             result = call(0x004A9B0B, regs);
             break;
-        case thing_type::vehicle_bogie:
+        case vehicle_thing_type::vehicle_bogie:
             result = call(0x004AA008, regs);
             break;
-        case thing_type::vehicle_body_end:
-        case thing_type::vehicle_body_cont:
+        case vehicle_thing_type::vehicle_body_end:
+        case vehicle_thing_type::vehicle_body_cont:
             result = sub_4AA1D0();
             break;
-        case thing_type::vehicle_6:
+        case vehicle_thing_type::vehicle_6:
             result = call(0x004AA24A, regs);
             break;
         default:
@@ -138,7 +138,7 @@ void vehicle::sub_4BA8D4()
     }
 
     auto v = next_car()->next_car()->next_car();
-    if (v->type != thing_type::vehicle_6)
+    if (v->type != vehicle_thing_type::vehicle_6)
     {
         while (true)
         {
@@ -171,14 +171,14 @@ void vehicle::sub_4BA8D4()
             vehicle* u;
             do
             {
-                if (v->type == thing_type::vehicle_6)
+                if (v->type == vehicle_thing_type::vehicle_6)
                 {
                     return;
                 }
                 u = v->next_car()->next_car();
-                if (u->type != thing_type::vehicle_body_end)
+                if (u->type != vehicle_thing_type::vehicle_body_end)
                     v = u->next_car();
-            } while (u->type != thing_type::vehicle_body_end);
+            } while (u->type != vehicle_thing_type::vehicle_body_end);
         }
     }
 }
@@ -196,7 +196,7 @@ int32_t openloco::vehicle::sub_4AA1D0()
     registers regs;
     regs.esi = (int32_t)this;
 
-    if (var_42 == 2 || var_42 == 3)
+    if (mode == TransportMode::air || mode == TransportMode::water)
     {
         animation_update();
         return 0;
@@ -1101,18 +1101,18 @@ void openloco::vehicle::steam_puffs_animation_update(uint8_t num, int8_t var_05)
             {
                 itemFound = false;
             }
-            auto elUnk1 = el.as_unk1();
-            if (elUnk1 == nullptr)
+            auto track = el.as_track();
+            if (track == nullptr)
                 continue;
-            if (elUnk1->base_z() != frontBogie->tile_base_z)
+            if (track->base_z() != frontBogie->tile_base_z)
                 continue;
-            if (elUnk1->unk_z() != loc.z)
-                continue;
-
-            if (!elUnk1->has_80())
+            if (track->unk_z() != loc.z)
                 continue;
 
-            if (!elUnk1->is_last())
+            if (!track->has_station_element())
+                continue;
+
+            if (!track->is_last())
                 itemFound = true;
         }
     }
@@ -1133,7 +1133,7 @@ void openloco::vehicle::steam_puffs_animation_update(uint8_t num, int8_t var_05)
             volume -= 1500;
         }
 
-        audio::play_sound(soundId, loc, volume, 22050, true);
+        audio::play_sound(audio::make_object_sound_id(soundId), loc, volume, 22050);
     }
     else
     {
@@ -1163,7 +1163,7 @@ void openloco::vehicle::steam_puffs_animation_update(uint8_t num, int8_t var_05)
             volume = -400;
         }
 
-        audio::play_sound(soundId, loc, volume, 22050, true);
+        audio::play_sound(audio::make_object_sound_id(soundId), loc, volume, 22050);
     }
 }
 
